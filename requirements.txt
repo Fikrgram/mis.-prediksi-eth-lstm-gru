@@ -1,0 +1,12 @@
+# Dependensi sistem prediksi harga Ethereum (LSTM vs GRU).
+# Versi dipatok agar model .h5 tersimpan dapat dimuat ulang secara konsisten
+# (format .h5 sensitif terhadap versi TensorFlow). Pasang dengan:
+#     pip install -r requirements.txt
+
+flask==3.1.2
+tensorflow==2.20.0
+scikit-learn==1.7.0
+pandas==2.3.3
+numpy==2.2.6
+joblib==1.5.1
+matplotlib==3.10.6

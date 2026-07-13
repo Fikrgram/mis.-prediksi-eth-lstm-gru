@@ -1,0 +1,550 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ETH Price Prediction - LSTM vs GRU</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #1f2937; }
+        ::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 4px; }
+
+        /* Progress bar INDETERMINATE: prediksi berlangsung cepat (detik) tanpa
+           tahap epoch, jadi bar meluncur bolak-balik alih-alih berbasis persen
+           yang menyesatkan. Saat selesai -> bar penuh solid. */
+        .progress-indeterminate { animation: indeterminate 1.1s ease-in-out infinite; }
+        @keyframes indeterminate {
+            0%   { margin-left: -40%; }
+            100% { margin-left: 100%; }
+        }
+        .progress-done { animation: none; margin-left: 0; width: 100% !important; }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-100 font-sans min-h-screen selection:bg-blue-500 selection:text-white">
+
+    <header class="bg-gray-800 border-b border-gray-700 shadow-md">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-5 flex justify-between items-center">
+            <div>
+                <h1 class="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-green-400">
+                    ETH Price Predictor
+                </h1>
+                <p class="text-sm text-gray-400 mt-1">Komparasi LSTM &amp; GRU (Univariate: Close Price) - Fikri Hasyim Al Rasyid</p>
+            </div>
+            <div class="hidden sm:flex items-center gap-2">
+                <span id="api-status" class="flex items-center gap-2 text-sm text-gray-400">
+                    <span class="relative flex h-3 w-3">
+                      <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-yellow-400 opacity-75"></span>
+                      <span class="relative inline-flex rounded-full h-3 w-3 bg-yellow-500"></span>
+                    </span>
+                    Menunggu koneksi API...
+                </span>
+            </div>
+        </div>
+    </header>
+
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 grid grid-cols-1 lg:grid-cols-3 gap-8">
+
+        <!-- ─── KOLOM KIRI: Upload & Kesimpulan ─────────────────────────── -->
+        <div class="lg:col-span-1 space-y-6">
+            <div class="bg-gray-800 rounded-xl shadow-lg border border-gray-700 p-6">
+                <h2 class="text-lg font-semibold text-white mb-4 flex items-center gap-2">
+                    <svg class="w-5 h-5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"></path></svg>
+                    Upload Dataset (.csv)
+                </h2>
+                <p class="text-xs text-gray-400 mb-4">
+                    Dataset dikirim ke backend Python, lalu diprediksi memakai model LSTM &amp; GRU
+                    yang <span class="text-gray-300">sudah dilatih sebelumnya</span> (offline) dan
+                    dievaluasi (RMSE/MAE/MAPE) — prosesnya cepat, tanpa pelatihan ulang. Hanya kolom
+                    <span class="font-mono text-gray-300">Close</span> / <span class="font-mono text-gray-300">Close Price</span> yang dipakai.
+                </p>
+
+                <label for="csvFileInput" class="flex flex-col items-center justify-center w-full h-28 border-2 border-dashed border-gray-600 rounded-lg cursor-pointer bg-gray-900 hover:bg-gray-700/50 hover:border-blue-500 transition-colors">
+                    <svg class="w-7 h-7 text-gray-500 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path></svg>
+                    <span class="text-xs text-gray-400">Klik untuk pilih file <span class="text-blue-400 font-medium">.csv</span></span>
+                    <span id="csvFileName" class="text-xs text-gray-500 mt-1"></span>
+                </label>
+                <input type="file" id="csvFileInput" accept=".csv,text/csv" class="hidden">
+                <p id="csvStatus" class="text-xs mt-2"></p>
+                <p class="text-[11px] text-gray-500 mt-2 leading-relaxed">
+                    Header wajib memuat kolom <span class="font-mono text-gray-400">Close</span> atau
+                    <span class="font-mono text-gray-400">Close Price</span> (kolom Open/High/Low/Volume/Adj Close
+                    akan diabaikan). Harga boleh berformat <span class="font-mono text-gray-400">"Rp 42,500,000.00"</span>.
+                    Kolom tanggal opsional namun disarankan agar urutan kronologis terjamin benar.
+                </p>
+
+                <button type="button" id="btnProcess" disabled
+                        class="mt-4 w-full bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 disabled:from-gray-700 disabled:to-gray-700 disabled:text-gray-500 disabled:cursor-not-allowed text-white font-semibold py-3 px-4 rounded-lg transition-all duration-200 flex justify-center items-center gap-2 shadow-lg shadow-blue-500/30">
+                    <span id="btnProcessLabel">Proses Prediksi</span>
+                    <svg id="loadingIcon" class="hidden animate-spin -ml-1 mr-1 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                </button>
+                <p id="progressStatus" class="text-xs mt-2 text-gray-400"></p>
+            </div>
+
+            <div id="datasetInfoCard" class="hidden bg-gray-800 rounded-xl p-5 border border-gray-700">
+                <p class="text-sm font-semibold text-gray-300 mb-2">Informasi Dataset</p>
+                <div class="text-xs text-gray-400 space-y-1" id="datasetInfoBody"></div>
+            </div>
+
+            <div id="conclusionCard" class="hidden bg-gray-800 rounded-xl p-5 border-2 border-l-4"></div>
+        </div>
+
+        <!-- ─── KOLOM KANAN: Metrik, Grafik, Tabel ──────────────────────── -->
+        <div class="lg:col-span-2 space-y-6">
+
+            <div id="placeholderPanel" class="bg-gray-800 rounded-xl shadow-lg border border-gray-700 p-6 h-full min-h-[400px] flex flex-col items-center justify-center text-gray-500">
+                <svg class="w-16 h-16 mb-4 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path></svg>
+                <p class="text-sm">Unggah dataset CSV lalu tekan "Proses Prediksi" untuk memprediksi dan mengevaluasi model LSTM &amp; GRU</p>
+            </div>
+
+            <!-- ─── PANEL PROSES PREDIKSI ──────────────────────────────── -->
+            <div id="trainingPanel" class="hidden bg-gray-800 rounded-xl shadow-lg border border-gray-700 p-6 space-y-4">
+                <div class="flex items-center justify-between">
+                    <h2 class="text-base font-semibold text-white flex items-center gap-2">
+                        <svg class="w-5 h-5 text-blue-400 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                        Memproses Prediksi
+                    </h2>
+                    <span id="trainPhaseBadge" class="text-xs px-2 py-1 rounded-full bg-blue-900/50 text-blue-300 border border-blue-700">menyiapkan...</span>
+                </div>
+
+                <!-- Progress bar indeterminate (prediksi cepat, tanpa tahap epoch) -->
+                <div>
+                    <div class="flex justify-between text-xs text-gray-400 mb-1">
+                        <span id="trainProgressLabel">Memproses…</span>
+                        <span id="trainProgressPct"></span>
+                    </div>
+                    <div class="w-full bg-gray-900 rounded-full h-2 overflow-hidden border border-gray-700">
+                        <div id="trainProgressBar" class="progress-indeterminate bg-gradient-to-r from-blue-500 to-green-500 h-full w-1/3 rounded-full"></div>
+                    </div>
+                </div>
+
+                <!-- Konsol log tahapan proses -->
+                <div>
+                    <p class="text-xs text-gray-400 mb-1">Log proses</p>
+                    <pre id="trainConsole" class="bg-gray-950 border border-gray-700 rounded-lg p-3 text-[11px] leading-relaxed text-green-300 font-mono h-48 overflow-y-auto whitespace-pre-wrap"></pre>
+                </div>
+            </div>
+
+            <div id="resultsPanel" class="hidden space-y-6">
+
+                <!-- Kartu Metrik -->
+                <div class="grid grid-cols-2 gap-4">
+                    <div class="bg-gray-800 rounded-xl p-5 border border-gray-700 border-l-4 border-l-blue-500">
+                        <p class="text-sm font-semibold text-blue-400 mb-3">Model LSTM <span id="lstmRunsLabel" class="text-xs font-normal text-gray-500"></span></p>
+                        <div class="space-y-1 text-sm">
+                            <div class="flex justify-between"><span class="text-gray-400">RMSE</span><span id="mLstmRmse" class="font-mono text-white">-</span></div>
+                            <div class="flex justify-between"><span class="text-gray-400">MAE</span><span id="mLstmMae" class="font-mono text-white">-</span></div>
+                            <div class="flex justify-between"><span class="text-gray-400">MAPE</span><span id="mLstmMape" class="font-mono text-white">-</span></div>
+                        </div>
+                    </div>
+                    <div class="bg-gray-800 rounded-xl p-5 border border-gray-700 border-l-4 border-l-green-500">
+                        <p class="text-sm font-semibold text-green-400 mb-3">Model GRU <span id="gruRunsLabel" class="text-xs font-normal text-gray-500"></span></p>
+                        <div class="space-y-1 text-sm">
+                            <div class="flex justify-between"><span class="text-gray-400">RMSE</span><span id="mGruRmse" class="font-mono text-white">-</span></div>
+                            <div class="flex justify-between"><span class="text-gray-400">MAE</span><span id="mGruMae" class="font-mono text-white">-</span></div>
+                            <div class="flex justify-between"><span class="text-gray-400">MAPE</span><span id="mGruMape" class="font-mono text-white">-</span></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Grafik LSTM -->
+                <div class="bg-gray-800 rounded-xl shadow-lg border border-gray-700 p-6">
+                    <h2 class="text-base font-semibold text-white mb-4">Grafik Actual vs Prediction — LSTM <span class="text-xs font-normal text-gray-500">(model tersimpan, run val_loss terendah)</span></h2>
+                    <div class="relative h-72 w-full"><canvas id="chartLstm"></canvas></div>
+                </div>
+
+                <!-- Grafik GRU -->
+                <div class="bg-gray-800 rounded-xl shadow-lg border border-gray-700 p-6">
+                    <h2 class="text-base font-semibold text-white mb-4">Grafik Actual vs Prediction — GRU <span class="text-xs font-normal text-gray-500">(model tersimpan, run val_loss terendah)</span></h2>
+                    <div class="relative h-72 w-full"><canvas id="chartGru"></canvas></div>
+                </div>
+
+                <!-- Tabel Perbandingan -->
+                <div class="bg-gray-800 rounded-xl shadow-lg border border-gray-700 p-6">
+                    <h2 class="text-base font-semibold text-white mb-4">Tabel Perbandingan Hasil Evaluasi <span id="comparisonRunsLabel" class="text-xs font-normal text-gray-500"></span></h2>
+                    <table class="w-full text-sm text-left">
+                        <thead>
+                            <tr class="text-gray-400 border-b border-gray-700">
+                                <th class="py-2 pr-4">Metrik</th>
+                                <th class="py-2 pr-4">LSTM (mean ± std)</th>
+                                <th class="py-2 pr-4">GRU (mean ± std)</th>
+                                <th class="py-2">Model Terbaik</th>
+                            </tr>
+                        </thead>
+                        <tbody id="comparisonTableBody" class="text-gray-200"></tbody>
+                    </table>
+                </div>
+
+                <!-- Rincian Tiap Run -->
+                <div class="bg-gray-800 rounded-xl shadow-lg border border-gray-700 p-6">
+                    <button type="button" id="btnTogglePerRun" class="w-full flex items-center justify-between text-left">
+                        <h2 class="text-base font-semibold text-white">Rincian Tiap Run (transparansi variansi)</h2>
+                        <svg id="perRunChevron" class="w-4 h-4 text-gray-400 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+                    </button>
+                    <div id="perRunContainer" class="hidden mt-4 overflow-x-auto">
+                        <table class="w-full text-sm text-left">
+                            <thead>
+                                <tr class="text-gray-400 border-b border-gray-700">
+                                    <th class="py-2 pr-4">Run</th>
+                                    <th class="py-2 pr-4">LSTM RMSE</th>
+                                    <th class="py-2 pr-4">LSTM MAE</th>
+                                    <th class="py-2 pr-4">LSTM MAPE</th>
+                                    <th class="py-2 pr-4">GRU RMSE</th>
+                                    <th class="py-2 pr-4">GRU MAE</th>
+                                    <th class="py-2">GRU MAPE</th>
+                                </tr>
+                            </thead>
+                            <tbody id="perRunTableBody" class="text-gray-300 font-mono text-xs"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </main>
+
+    <script>
+        const API_BASE = window.location.origin;
+        const PROCESS_URL = `${API_BASE}/api/process`;
+        const STREAM_URL = `${API_BASE}/api/stream`;
+        const HEALTH_URL = `${API_BASE}/health`;
+
+        let selectedFile = null;
+        let chartLstm = null;
+        let chartGru = null;
+        let eventSource = null;
+
+        // ── Cek koneksi API saat halaman dimuat ─────────────────────────
+        window.addEventListener('DOMContentLoaded', async () => {
+            const statusEl = document.getElementById('api-status');
+            try {
+                const res = await fetch(HEALTH_URL);
+                if (res.ok) {
+                    statusEl.innerHTML = `<span class="relative flex h-3 w-3"><span class="relative inline-flex rounded-full h-3 w-3 bg-green-500"></span></span> API Terhubung`;
+                    statusEl.classList.replace('text-gray-400', 'text-green-400');
+                }
+            } catch (error) {
+                statusEl.innerHTML = `<span class="relative flex h-3 w-3"><span class="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span></span> API Terputus`;
+                statusEl.classList.replace('text-gray-400', 'text-red-400');
+            }
+        });
+
+        const numberFmt = (n, digits = 2) => Number(n).toLocaleString('id-ID', {
+            minimumFractionDigits: digits, maximumFractionDigits: digits
+        });
+
+        // ── Toggle tabel rincian tiap run ─────────────────────────────────
+        document.getElementById('btnTogglePerRun').addEventListener('click', () => {
+            const container = document.getElementById('perRunContainer');
+            const chevron = document.getElementById('perRunChevron');
+            container.classList.toggle('hidden');
+            chevron.classList.toggle('rotate-180');
+        });
+
+        // ── Pemilihan file CSV ───────────────────────────────────────────
+        document.getElementById('csvFileInput').addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            const statusEl = document.getElementById('csvStatus');
+            const nameEl = document.getElementById('csvFileName');
+            const btn = document.getElementById('btnProcess');
+
+            if (!file) {
+                selectedFile = null;
+                btn.disabled = true;
+                return;
+            }
+
+            if (!file.name.toLowerCase().endsWith('.csv')) {
+                statusEl.textContent = 'File harus berformat .csv';
+                statusEl.className = 'text-xs mt-2 text-red-400';
+                selectedFile = null;
+                btn.disabled = true;
+                return;
+            }
+
+            selectedFile = file;
+            nameEl.textContent = file.name;
+            statusEl.textContent = `[✓] Siap diproses (${(file.size / 1024).toFixed(1)} KB)`;
+            statusEl.className = 'text-xs mt-2 text-green-400';
+            btn.disabled = false;
+        });
+
+        // ── Helper konsol log & progress proses ──────────────────────────
+        function logConsole(msg) {
+            const el = document.getElementById('trainConsole');
+            const ts = new Date().toLocaleTimeString('id-ID', { hour12: false });
+            el.textContent += `[${ts}] ${msg}\n`;
+            el.scrollTop = el.scrollHeight;
+        }
+
+        function setPhaseBadge(text) {
+            document.getElementById('trainPhaseBadge').textContent = text;
+        }
+
+        // ── Tombol "Proses Prediksi" ─────────────────────────────────────
+        document.getElementById('btnProcess').addEventListener('click', async () => {
+            if (!selectedFile) return;
+
+            const btn = document.getElementById('btnProcess');
+            const label = document.getElementById('btnProcessLabel');
+            const icon = document.getElementById('loadingIcon');
+            const progressEl = document.getElementById('progressStatus');
+            const csvStatus = document.getElementById('csvStatus');
+
+            btn.disabled = true;
+            icon.classList.remove('hidden');
+            label.textContent = 'Memproses…';
+            progressEl.textContent = '';
+
+            // Siapkan panel proses prediksi
+            document.getElementById('placeholderPanel').classList.add('hidden');
+            document.getElementById('resultsPanel').classList.add('hidden');
+            const trainingPanel = document.getElementById('trainingPanel');
+            trainingPanel.classList.remove('hidden');
+            document.getElementById('trainConsole').textContent = '';
+            const _bar = document.getElementById('trainProgressBar');
+            _bar.style.width = '';
+            _bar.classList.remove('progress-done');
+            _bar.classList.add('progress-indeterminate');
+            document.getElementById('trainProgressPct').textContent = '';
+            document.getElementById('trainProgressLabel').textContent = 'Mengunggah dataset…';
+            setPhaseBadge('mengunggah…');
+
+            if (eventSource) { eventSource.close(); eventSource = null; }
+
+            try {
+                const formData = new FormData();
+                formData.append('dataset', selectedFile);
+
+                const response = await fetch(PROCESS_URL, { method: 'POST', body: formData });
+                const data = await response.json();
+
+                if (!response.ok || !data.job_id) {
+                    finishTraining(btn, label, icon);
+                    trainingPanel.classList.add('hidden');
+                    document.getElementById('placeholderPanel').classList.remove('hidden');
+                    alert('Error dari server: ' + (data.message || 'Gagal memulai proses.'));
+                    return;
+                }
+
+                logConsole('Dataset terunggah. Memulai job prediksi (id: ' + data.job_id + ').');
+                subscribeToJob(data.job_id, btn, label, icon, csvStatus);
+            } catch (error) {
+                finishTraining(btn, label, icon);
+                trainingPanel.classList.add('hidden');
+                document.getElementById('placeholderPanel').classList.remove('hidden');
+                alert('Gagal menghubungi API. Pastikan server Flask (app.py) sudah berjalan.');
+                console.error(error);
+            }
+        });
+
+        function finishTraining(btn, label, icon) {
+            btn.disabled = false;
+            icon.classList.add('hidden');
+            label.textContent = 'Proses Prediksi';
+            if (eventSource) { eventSource.close(); eventSource = null; }
+        }
+
+        // ── Berlangganan aliran progres proses prediksi (SSE) ────────────
+        function subscribeToJob(jobId, btn, label, icon, csvStatus) {
+            eventSource = new EventSource(`${STREAM_URL}/${jobId}`);
+
+            eventSource.onmessage = (e) => {
+                let ev;
+                try { ev = JSON.parse(e.data); } catch (_) { return; }
+
+                if (ev.type === 'phase') {
+                    logConsole(ev.message);
+                    document.getElementById('trainProgressLabel').textContent =
+                        ev.message.length > 48 ? ev.message.slice(0, 48) + '…' : ev.message;
+                    setPhaseBadge(ev.message.length > 32 ? ev.message.slice(0, 32) + '…' : ev.message);
+
+                } else if (ev.type === 'done') {
+                    logConsole('Prediksi selesai. Menampilkan hasil evaluasi.');
+                    setPhaseBadge('selesai ✓');
+                    const bar = document.getElementById('trainProgressBar');
+                    bar.classList.remove('progress-indeterminate');
+                    bar.classList.add('progress-done');
+                    document.getElementById('trainProgressLabel').textContent = 'Selesai';
+                    finishTraining(btn, label, icon);
+                    csvStatus.textContent = '[✓] Dataset berhasil diproses.';
+                    csvStatus.className = 'text-xs mt-2 text-green-400';
+                    renderResults(ev.result);
+
+                } else if (ev.type === 'error') {
+                    logConsole('ERROR: ' + ev.message);
+                    setPhaseBadge('gagal ✗');
+                    document.getElementById('trainProgressBar').classList.remove('progress-indeterminate');
+                    finishTraining(btn, label, icon);
+                    alert('Error dari server: ' + ev.message);
+                }
+            };
+
+            eventSource.onerror = () => {
+                // Koneksi SSE terputus (biasanya setelah 'done'/'error' menutup stream di server).
+                if (eventSource && eventSource.readyState === EventSource.CLOSED) {
+                    finishTraining(btn, label, icon);
+                }
+            };
+        }
+
+        // ── Render seluruh hasil ke UI ────────────────────────────────────
+        function renderResults(data) {
+            document.getElementById('placeholderPanel').classList.add('hidden');
+            document.getElementById('resultsPanel').classList.remove('hidden');
+
+            const isPredict = data.mode === 'predict';
+
+            if (data.warnings && data.warnings.length > 0) {
+                alert('Peringatan:\n' + data.warnings.join('\n'));
+            }
+
+            // Info dataset
+            const info = data.dataset_info;
+            const nRuns = data.n_runs;
+            const avgEpochs = (runs) => Math.round(runs.reduce((s, r) => s + r.epochs, 0) / runs.length);
+            const mi = data.model_info || {};
+            const infoCard = document.getElementById('datasetInfoCard');
+            infoCard.classList.remove('hidden');
+            document.getElementById('datasetInfoBody').innerHTML = `
+                <div class="flex justify-between"><span>Total data</span><span class="text-gray-200">${info.total_rows} baris</span></div>
+                <div class="flex justify-between"><span>Data Train</span><span class="text-gray-200">${info.train_rows} baris</span></div>
+                <div class="flex justify-between"><span>Data Validasi</span><span class="text-gray-200">${info.val_rows} baris</span></div>
+                <div class="flex justify-between"><span>Data Test</span><span class="text-gray-200">${info.test_rows} baris</span></div>
+                <div class="flex justify-between"><span>Lookback window</span><span class="text-gray-200">${data.config.lookback} hari</span></div>
+                ${isPredict
+                    ? `<div class="flex justify-between"><span>Sumber prediksi</span><span class="text-gray-200">Model tersimpan (tanpa latih ulang)</span></div>
+                       <div class="flex justify-between"><span>Epoch pelatihan LSTM / GRU</span><span class="text-gray-200">${avgEpochs(data.per_run.lstm)} / ${avgEpochs(data.per_run.gru)}</span></div>`
+                    : `<div class="flex justify-between"><span>Jumlah run</span><span class="text-gray-200">${nRuns}</span></div>
+                       <div class="flex justify-between"><span>Rata-rata epoch LSTM / GRU</span><span class="text-gray-200">${avgEpochs(data.per_run.lstm)} / ${avgEpochs(data.per_run.gru)}</span></div>`}
+                ${isPredict && (mi.source_run || mi.promoted_at)
+                    ? `<div class="pt-2 mt-2 border-t border-gray-700"><span class="block text-gray-500">Model matang dilatih offline${mi.trained_n_runs ? ` (${mi.trained_n_runs} run)` : ''}${mi.promoted_at ? `, ${mi.promoted_at}` : ''}:</span><span class="block text-gray-300 font-mono text-[11px] mt-1 break-all">${mi.source_run || 'best_model'}</span></div>`
+                    : ''}
+                ${data.saved_to ? `<div class="pt-2 mt-2 border-t border-gray-700"><span class="block text-gray-500">Artefak disimpan di folder baru (tidak menimpa run sebelumnya):</span><span class="block text-gray-300 font-mono text-[11px] mt-1 break-all">${data.saved_to}</span></div>` : ''}
+            `;
+
+            const runsLabel = isPredict ? '(model tersimpan)' : `(mean ± std, n=${nRuns})`;
+            document.getElementById('lstmRunsLabel').textContent = runsLabel;
+            document.getElementById('gruRunsLabel').textContent = runsLabel;
+            document.getElementById('comparisonRunsLabel').textContent = runsLabel;
+
+            // Kartu metrik (mean ± std dari N run)
+            const lstm = data.metrics.lstm;
+            const gru = data.metrics.gru;
+            const fmtStat = (stat, digits = 2, suffix = '') =>
+                `${numberFmt(stat.mean, digits)} ± ${numberFmt(stat.std, digits)}${suffix}`;
+            document.getElementById('mLstmRmse').textContent = fmtStat(lstm.rmse);
+            document.getElementById('mLstmMae').textContent = fmtStat(lstm.mae);
+            document.getElementById('mLstmMape').textContent = fmtStat(lstm.mape, 2, ' %');
+            document.getElementById('mGruRmse').textContent = fmtStat(gru.rmse);
+            document.getElementById('mGruMae').textContent = fmtStat(gru.mae);
+            document.getElementById('mGruMape').textContent = fmtStat(gru.mape, 2, ' %');
+
+            // Tabel perbandingan (berdasarkan rata-rata tiap metrik)
+            const conclusion = data.conclusion;
+            const rows = [
+                ['RMSE', lstm.rmse, gru.rmse, conclusion.RMSE],
+                ['MAE', lstm.mae, gru.mae, conclusion.MAE],
+                ['MAPE (%)', lstm.mape, gru.mape, conclusion.MAPE],
+            ];
+            document.getElementById('comparisonTableBody').innerHTML = rows.map(([metric, l, g, winner]) => `
+                <tr class="border-b border-gray-700/50">
+                    <td class="py-2 pr-4 text-gray-400">${metric}</td>
+                    <td class="py-2 pr-4 font-mono ${winner === 'LSTM' ? 'text-blue-400 font-semibold' : ''}">${fmtStat(l)}</td>
+                    <td class="py-2 pr-4 font-mono ${winner === 'GRU' ? 'text-green-400 font-semibold' : ''}">${fmtStat(g)}</td>
+                    <td class="py-2 font-semibold ${winner === 'LSTM' ? 'text-blue-400' : (winner === 'GRU' ? 'text-green-400' : 'text-gray-400')}">${winner}</td>
+                </tr>
+            `).join('');
+
+            // Kesimpulan
+            const finalWinner = conclusion.kesimpulan_akhir;
+            const colorBorder = finalWinner === 'LSTM' ? 'border-blue-500' : (finalWinner === 'GRU' ? 'border-green-500' : 'border-gray-500');
+            const colorText = finalWinner === 'LSTM' ? 'text-blue-400' : (finalWinner === 'GRU' ? 'text-green-400' : 'text-gray-400');
+            const conclusionCard = document.getElementById('conclusionCard');
+            conclusionCard.className = `bg-gray-800 rounded-xl p-5 border-2 border-gray-700 border-l-4 ${colorBorder}`;
+            conclusionCard.classList.remove('hidden');
+            conclusionCard.innerHTML = `
+                <p class="text-sm text-gray-400 mb-1">Kesimpulan Model Terbaik <span class="text-gray-500">${isPredict ? '(model tersimpan)' : `(dari ${nRuns} run)`}</span></p>
+                <p class="text-2xl font-bold ${colorText}">${finalWinner}</p>
+                <p class="text-xs text-gray-500 mt-2">Unggul pada ${finalWinner === 'LSTM' ? conclusion.skor_lstm : conclusion.skor_gru} dari 3 metrik evaluasi (RMSE, MAE, MAPE)${isPredict ? ', dievaluasi memakai model matang tersimpan.' : `, berdasarkan rata-rata ${nRuns} kali training.`}</p>
+                <div class="text-xs text-gray-400 mt-3 space-y-1">
+                    <div>RMSE terbaik: <span class="font-semibold text-gray-200">${conclusion.RMSE}</span></div>
+                    <div>MAE terbaik: <span class="font-semibold text-gray-200">${conclusion.MAE}</span></div>
+                    <div>MAPE terbaik: <span class="font-semibold text-gray-200">${conclusion.MAPE}</span></div>
+                </div>
+            `;
+
+            renderPerRunTable(data.per_run);
+            renderCharts(data.chart_data);
+        }
+
+        function renderPerRunTable(perRun) {
+            const rows = perRun.lstm.map((l, i) => {
+                const g = perRun.gru[i];
+                return `
+                    <tr class="border-b border-gray-700/30">
+                        <td class="py-1.5 pr-4">${l.run}</td>
+                        <td class="py-1.5 pr-4">${numberFmt(l.rmse)}</td>
+                        <td class="py-1.5 pr-4">${numberFmt(l.mae)}</td>
+                        <td class="py-1.5 pr-4">${numberFmt(l.mape)}</td>
+                        <td class="py-1.5 pr-4">${numberFmt(g.rmse)}</td>
+                        <td class="py-1.5 pr-4">${numberFmt(g.mae)}</td>
+                        <td class="py-1.5">${numberFmt(g.mape)}</td>
+                    </tr>`;
+            }).join('');
+            document.getElementById('perRunTableBody').innerHTML = rows;
+        }
+
+        function renderCharts(chartData) {
+            Chart.defaults.color = '#9ca3af';
+            Chart.defaults.font.family = 'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+
+            const commonOptions = {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: { mode: 'index', intersect: false },
+                plugins: {
+                    legend: { position: 'top', labels: { usePointStyle: true, boxWidth: 8 } },
+                    tooltip: {
+                        backgroundColor: 'rgba(17, 24, 39, 0.9)',
+                        titleColor: '#fff', bodyColor: '#e5e7eb',
+                        borderColor: '#374151', borderWidth: 1,
+                    },
+                },
+                scales: {
+                    x: { grid: { display: false }, ticks: { maxTicksLimit: 12 } },
+                    y: { grid: { color: 'rgba(55, 65, 81, 0.5)' } },
+                },
+            };
+
+            if (chartLstm) chartLstm.destroy();
+            if (chartGru) chartGru.destroy();
+
+            chartLstm = new Chart(document.getElementById('chartLstm').getContext('2d'), {
+                type: 'line',
+                data: {
+                    labels: chartData.labels,
+                    datasets: [
+                        { label: 'Actual', data: chartData.actual, borderColor: '#9ca3af', backgroundColor: 'rgba(156,163,175,0.08)', borderWidth: 2, pointRadius: 0, tension: 0.15, fill: true },
+                        { label: 'Prediction LSTM', data: chartData.pred_lstm, borderColor: '#3b82f6', borderWidth: 2, pointRadius: 0, tension: 0.15 },
+                    ],
+                },
+                options: commonOptions,
+            });
+
+            chartGru = new Chart(document.getElementById('chartGru').getContext('2d'), {
+                type: 'line',
+                data: {
+                    labels: chartData.labels,
+                    datasets: [
+                        { label: 'Actual', data: chartData.actual, borderColor: '#9ca3af', backgroundColor: 'rgba(156,163,175,0.08)', borderWidth: 2, pointRadius: 0, tension: 0.15, fill: true },
+                        { label: 'Prediction GRU', data: chartData.pred_gru, borderColor: '#22c55e', borderWidth: 2, pointRadius: 0, tension: 0.15 },
+                    ],
+                },
+                options: commonOptions,
+            });
+        }
+    </script>
+</body>
+</html>

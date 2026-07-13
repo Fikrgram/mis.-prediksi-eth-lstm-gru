@@ -1,0 +1,29 @@
+# =============================================================================
+# Python
+# =============================================================================
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+.Python
+
+# =============================================================================
+# Editor / tooling
+# =============================================================================
+.claude/
+.vscode/
+.idea/
+*.log
+
+# =============================================================================
+# Artefak model & output
+# -----------------------------------------------------------------------------
+# Abaikan SELURUH isi output_model/ (arsip run_*, file uji-coba, arsip lama)
+# KECUALI folder produksi best_model/ agar web bisa langsung dipakai setelah
+# clone tanpa harus melatih ulang. Untuk menghasilkan best_model versi baru,
+# jalankan: python train_model.py --data data_eth_idr.csv
+# =============================================================================
+output_model/*
+!output_model/best_model/
