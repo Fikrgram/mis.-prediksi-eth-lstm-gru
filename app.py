@@ -49,7 +49,10 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 OUTPUT_DIR = os.path.join(BASE_DIR, "output_model")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-HOST = "0.0.0.0"
+# Default 127.0.0.1 (localhost) — server hanya bisa diakses dari komputer ini,
+# tidak terekspos ke jaringan. Bila perlu diakses dari perangkat lain di jaringan
+# yang sama (mis. demo dari HP), jalankan dengan: HOST=0.0.0.0 python app.py
+HOST = os.environ.get("HOST", "127.0.0.1")
 PORT = int(os.environ.get("PORT", 5000))
 DEBUG = False
 
