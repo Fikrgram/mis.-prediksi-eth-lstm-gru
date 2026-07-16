@@ -156,6 +156,41 @@ def save_training_log(run_dir: str, result: dict, artifacts: dict) -> None:
         f.write("\n".join(lines))
 
 
+def save_training_history(run_dir: str, artifacts: dict) -> None:
+    """
+    Simpan kurva loss/val_loss LENGKAP per-epoch (LSTM & GRU) sebagai JSON
+    terstruktur -- versi mesin-terbaca dari tabel yang sama di training_log.txt,
+    untuk menjawab pertanyaan "di epoch berapa model ini dikatakan terbaik?"
+    tanpa perlu mem-parsing teks log. Ikut dipromosikan ke best_model/ oleh
+    [[promote_best_model]] agar menempel ke model produksi yang aktif dipakai.
+    """
+    history_json = {}
+    for name in ("lstm", "gru"):
+        history = artifacts[f"history_{name}"].history
+        loss = history["loss"]
+        val_loss = history["val_loss"]
+        best_idx = min(range(len(val_loss)), key=lambda i: val_loss[i])
+
+        history_json[name] = {
+            "total_epochs": len(loss),
+            "best_epoch": best_idx + 1,
+            "best_val_loss": float(val_loss[best_idx]),
+            "epochs": [
+                {
+                    "epoch": i + 1,
+                    "loss": float(loss[i]),
+                    "val_loss": float(val_loss[i]),
+                    "is_best": i == best_idx,
+                }
+                for i in range(len(loss))
+            ],
+        }
+
+    history_path = os.path.join(run_dir, "training_history.json")
+    with open(history_path, "w", encoding="utf-8") as f:
+        json.dump(history_json, f, indent=2, ensure_ascii=False)
+
+
 # =============================================================================
 # MODEL PRODUKSI PERMANEN — PROMOSI (SIMPAN) & PEMUATAN (LOAD)
 # =============================================================================
@@ -206,6 +241,12 @@ def promote_best_model(base_dir: str, run_dir: str, result: dict) -> str:
                 "produksi dibatalkan."
             )
         shutil.copy2(src, os.path.join(dest, filename))
+
+    # training_history.json bersifat opsional (hasil run lama sebelum fitur ini
+    # ada belum memilikinya) -- salin bila ada, jangan gagalkan promosi bila tidak.
+    history_src = os.path.join(run_dir, "training_history.json")
+    if os.path.exists(history_src):
+        shutil.copy2(history_src, os.path.join(dest, "training_history.json"))
 
     metadata = {
         "promoted_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),

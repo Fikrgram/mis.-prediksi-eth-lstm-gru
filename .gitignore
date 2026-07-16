@@ -18,6 +18,15 @@ env/
 *.log
 
 # =============================================================================
+# Draf naskah skripsi — dokumen pribadi, bukan bagian dari kode sistem.
+# Jangan sampai ikut terunggah ke repositori.
+# =============================================================================
+BAB *.html
+BAB_*.html
+*.docx
+~$*
+
+# =============================================================================
 # Artefak model & output
 # -----------------------------------------------------------------------------
 # Abaikan SELURUH isi output_model/ (arsip run_*, file uji-coba, arsip lama)

@@ -286,7 +286,9 @@ def main():
 
     storage.save_run_summary(run_dir, result_without_artifacts)
     storage.save_training_log(run_dir, result_without_artifacts, artifacts)
+    storage.save_training_history(run_dir, artifacts)
     print(f"  [v] Log proses training disimpan di: {os.path.join(run_dir, 'training_log.txt')}")
+    print(f"  [v] History epoch (JSON) disimpan di: {os.path.join(run_dir, 'training_history.json')}")
 
     # -------------------------------------------------------------------------
     # PROMOSI MODEL PRODUKSI: salin model TERBAIK ke folder permanen agar web
